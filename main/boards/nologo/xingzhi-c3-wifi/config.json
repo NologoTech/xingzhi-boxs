@@ -5,7 +5,9 @@
     "builds": [
         {
             "name": "xingzhi-c3-wifi",
-            "sdkconfig_append": []
+            "sdkconfig_append": [
+                "CONFIG_USE_ESP_WAKE_WORD=y"
+            ]
         }
     ]
 }

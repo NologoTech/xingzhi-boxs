@@ -370,9 +370,6 @@ choice BOARD_TYPE
     config BOARD_TYPE_XINGZHI_ABS_2_0
         bool "Nologo Xingzhi ABS 2.0 (无名科技星智)"
         depends on IDF_TARGET_ESP32S3
-    config BOARD_TYPE_XINGZHI_C3_4G
-        bool "Nologo Xingzhi C3 4G (无名科技星智)"
-        depends on IDF_TARGET_ESP32C3
     config BOARD_TYPE_XINGZHI_C3_WIFI
         bool "Nologo Xingzhi C3 Wi-Fi (无名科技星智)"
         depends on IDF_TARGET_ESP32C3

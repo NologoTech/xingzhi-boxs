@@ -35,4 +35,4 @@ public:
     virtual std::string GetDeviceStatusJson() override;
 };
 
-#endif // ML307_BOARD_H
+#endif // ML307_BOARD_H0.

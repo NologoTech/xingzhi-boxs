@@ -86,6 +86,8 @@ public:
                                             AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
                                             AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
                                             AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+        // Board mic path is quiet at default 30 dB; raise so ASR/wake see usable levels.
+        audio_codec.SetInputGain(56.0f);
         return &audio_codec;
     }
 
