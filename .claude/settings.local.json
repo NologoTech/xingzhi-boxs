@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wsl -d Ubuntu -- bash -lc 'cd ~/esp-project/26-9-12/xingzhi-boxs && ls && echo \"--- IDF_PATH ---\" && echo $IDF_PATH && ls ~/esp/esp-idf/export.sh 2>/dev/null || echo \"no export.sh at ~/esp/esp-idf\"')",
+      "Bash(wsl -d Ubuntu -- bash -lc 'cd ~/esp-project/26-9-12/xingzhi-boxs && . ~/esp/esp-idf/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | tail -40')",
+      "Bash(wsl -d Ubuntu -- bash -lc 'cd ~/esp-project/26-9-12/xingzhi-boxs && . ~/esp/esp-idf/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | tail -20')",
+      "Bash(cd \"//wsl.localhost/Ubuntu/home/wuhaha/esp-project/26-9-12/xingzhi-boxs\" && ls build/ 2>/dev/null | head -20 && echo \"--- ninja?\" && ls build/build.ninja 2>/dev/null && ls build/CMakeCache.txt 2>/dev/null)",
+      "Read(///wsl.localhost/Ubuntu/home/wuhaha/esp-project/26-9-12/**)",
+      "Bash(cd \"//wsl.localhost/Ubuntu/home/wuhaha/esp-project/26-9-12/xingzhi-boxs\" && head -60 scripts/build.py)",
+      "Read(//c/esp/v5.5.5/esp-idf/**)",
+      "Read(//c/esp/v5.5.5//**)",
+      "Read(//c/esp/v5.5.5/esp-idf/tools/**)",
+      "Bash(wsl.exe -d Ubuntu -- bash -lc 'ls -d ~/esp/esp-idf /opt/esp-idf 2>/dev/null; echo \"---IDF_PATH=$IDF_PATH\"; ls /home/wuhaha/esp-project/26-9-12/xingzhi-boxs/sdkconfig >/dev/null && echo \"project ok\"; which idf.py')",
+      "Bash(wsl.exe -d Ubuntu -- bash -lc 'cd /home/wuhaha/esp-project/26-9-12/xingzhi-boxs && source ~/esp/esp-idf/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | tail -40')",
+      "Bash(wsl.exe -d Ubuntu -- bash -lc 'cd /home/wuhaha/esp-project/26-9-12/xingzhi-boxs && source ~/esp/esp-idf/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | grep -Ei \"error|warning|xiaozhi.bin binary|Project build complete\" | head -30')",
+      "Bash(wsl.exe -d Ubuntu -- bash -lc 'cd /home/wuhaha/esp-project/26-9-12/xingzhi-boxs && source ~/esp/esp-idf/export.sh >/dev/null 2>&1 && idf.py build 2>&1 | tr -d \"\\\\r\" | grep -aEi \"error|warning:|binary size|Project build complete\" | head -30')",
+      "Bash(wsl.exe -d Ubuntu -- bash -lc 'cd /home/wuhaha/esp-project/26-9-12/xingzhi-boxs && git --no-pager diff --stat -- main/application.cc main/application.h main/protocols/mqtt_protocol.cc main/components/esp-ml307/ && echo \"=== at_uart.h/.cc ===\" && git --no-pager diff -- main/components/esp-ml307/src/at_uart.cc main/components/esp-ml307/include/at_uart.h')"
+    ]
+  }
+}

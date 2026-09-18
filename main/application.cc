@@ -516,8 +516,22 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        if (GetDeviceState() == kDeviceStateSpeaking) {
-            audio_service_.PushPacketToDecodeQueue(std::move(packet));
+        auto state = GetDeviceState();
+        // Listening 也入队：避免首批 UDP 早于 tts start 的 Schedule 被静默丢弃
+        if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
+            if (!audio_service_.PushPacketToDecodeQueue(std::move(packet), true)) {
+                static uint32_t push_fail = 0;
+                if ((++push_fail % 20) == 1) {
+                    ESP_LOGW(TAG, "PushPacketToDecodeQueue failed count=%lu",
+                             static_cast<unsigned long>(push_fail));
+                }
+            }
+        } else {
+            static uint32_t drop_count = 0;
+            if ((++drop_count % 20) == 1) {
+                ESP_LOGW(TAG, "Drop incoming audio, state=%d count=%lu", static_cast<int>(state),
+                         static_cast<unsigned long>(drop_count));
+            }
         }
     });
 
@@ -555,9 +569,14 @@ void Application::InitializeProtocol() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
                     aborted_ = false;
-                    SetDeviceState(kDeviceStateSpeaking);
+                    auto device_state = GetDeviceState();
+                    // 对齐 395：仅从 Idle/Listening 进入 Speaking
+                    if (device_state == kDeviceStateIdle || device_state == kDeviceStateListening) {
+                        SetDeviceState(kDeviceStateSpeaking);
+                    }
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
+                ESP_LOGI(TAG, "TTS stop received");
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -953,8 +972,8 @@ void Application::HandleStateChangedEvent() {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // Only AFE wake word can be detected in speaking mode
-                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
+                // TTS 播放与 WakeNet 同时运行会争用内部 SRAM，4G 下易导致 AES/UDP 问题。
+                audio_service_.EnableWakeWordDetection(false);
             }
             audio_service_.ResetDecoder();
             break;

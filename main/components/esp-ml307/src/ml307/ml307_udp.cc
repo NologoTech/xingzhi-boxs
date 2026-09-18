@@ -41,7 +41,15 @@ Ml307Udp::Ml307Udp(std::shared_ptr<AtUart> at_uart, int udp_id) : at_uart_(at_ua
             if (arguments[1].int_value == udp_id_) {
                 if (arguments[0].string_value == "rudp") {
                     if (message_callback_) {
-                        message_callback_(at_uart_->DecodeHex(arguments[3].string_value));
+                        // 对齐 395：MIPURC 载荷始终按 hex 解码
+                        const auto& hex = arguments[3].string_value;
+                        auto decoded = at_uart_->DecodeHex(hex);
+                        rx_packet_count_++;
+                        if (rx_packet_count_ == 1 || (rx_packet_count_ % 50) == 0) {
+                            ESP_LOGI(TAG, "UDP rx#%u hex_len=%u decoded_len=%u", rx_packet_count_,
+                                     (unsigned)hex.size(), (unsigned)decoded.size());
+                        }
+                        message_callback_(std::move(decoded));
                     }
                 } else if (arguments[0].string_value == "disconn") {
                     connected_ = false;
@@ -203,44 +211,45 @@ bool Ml307Udp::Connect(const std::string& host, int port) {
             instance_active_ = false;
         }
 
-        // XJ/美格常不支持 MIPCFG；失败时仍继续 MIPOPEN（旧可用固件即如此）
-        // encoding=1,1：hex 拼进 AT+MIPSEND；0,1：命令后跟原始 payload
-        const char* encodings[] = {"1,1", "0,1"};
-        for (const char* enc : encodings) {
-            at_uart_->SendCommand("AT+MIPCFG=\"ssl\"," + std::to_string(id) + ",0,0", 1000);
-            if (!at_uart_->SendCommand("AT+MIPCFG=\"encoding\"," + std::to_string(id) + "," + enc,
-                                       1000)) {
-                ESP_LOGW(TAG, "MIPCFG encoding=%s failed on id=%d, still try MIPOPEN", enc, id);
-            }
-            send_hex_in_command_ = (enc[0] == '1');
+        // 对齐 395：始终按 hex 收发。MIPCFG encoding=1,1 失败时仍继续 MIPOPEN（部分 XJ），
+        // 但不得切换到非 hex，否则下行 URC 不 DecodeHex 会导致 TTS 静音。
+        bool mipcfg_ok =
+            at_uart_->SendCommand("AT+MIPCFG=\"encoding\"," + std::to_string(id) + ",1,1", 1000);
+        at_uart_->SendCommand("AT+MIPCFG=\"ssl\"," + std::to_string(id) + ",0,0", 1000);
+        if (!mipcfg_ok) {
+            ESP_LOGW(TAG, "MIPCFG encoding=1,1 failed on id=%d, still MIPOPEN as hex (align 395)",
+                     id);
+        }
+        send_hex_in_command_ = true;
+        rx_packet_count_ = 0;
 
-            std::string p = std::to_string(port);
-            std::string i = std::to_string(id);
-            std::string lp = (local_port_ == 0) ? "" : std::to_string(local_port_);
+        std::string p = std::to_string(port);
+        std::string i = std::to_string(id);
+        std::string lp = (local_port_ == 0) ? "" : std::to_string(local_port_);
 
-            std::string cmds[10];
-            int n = 0;
-            // 旧 XJ2113 可用固件优先的格式
-            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p;
-            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60";
-            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60,0";
-            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60,0,0";
-            cmds[n++] = "AT+MIPOPEN=" + i + ",0,\"" + ip + "\"," + p + ",1";
-            cmds[n++] = "AT+MIPOPEN=" + i + ",0,\"" + ip + "\"," + p + ",1,0";
-            // 官方 ML307 空 local port
-            if (local_port_ == 0) {
-                cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",,0";
-            } else {
-                cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + "," + lp + ",0";
-            }
-            cmds[n++] = "AT+MIPOPEN=" + i + ",1,\"" + ip + "\"," + p;
-            cmds[n++] = "AT+MIPOPEN=" + i + ",1,\"" + ip + "\"," + p + ",0";
+        std::string cmds[10];
+        int n = 0;
+        // 官方 ML307（395）优先：空 local port
+        if (local_port_ == 0) {
+            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",,0";
+        } else {
+            cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + "," + lp + ",0";
+        }
+        // 旧 XJ2113 可用固件格式
+        cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p;
+        cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60";
+        cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60,0";
+        cmds[n++] = "AT+MIPOPEN=" + i + ",\"UDP\",\"" + ip + "\"," + p + ",60,0,0";
+        cmds[n++] = "AT+MIPOPEN=" + i + ",0,\"" + ip + "\"," + p + ",1";
+        cmds[n++] = "AT+MIPOPEN=" + i + ",0,\"" + ip + "\"," + p + ",1,0";
+        cmds[n++] = "AT+MIPOPEN=" + i + ",1,\"" + ip + "\"," + p;
+        cmds[n++] = "AT+MIPOPEN=" + i + ",1,\"" + ip + "\"," + p + ",0";
 
-            for (int c = 0; c < n; c++) {
-                if (TryOpen(cmds[c], id)) {
-                    ESP_LOGI(TAG, "UDP connected %s:%d id=%d enc=%s", ip.c_str(), port, id, enc);
-                    return true;
-                }
+        for (int c = 0; c < n; c++) {
+            if (TryOpen(cmds[c], id)) {
+                ESP_LOGI(TAG, "UDP connected %s:%d id=%d mipcfg_ok=%d hex=1", ip.c_str(), port, id,
+                         mipcfg_ok ? 1 : 0);
+                return true;
             }
         }
     }
@@ -272,21 +281,14 @@ int Ml307Udp::Send(const std::string& data) {
         return -1;
     }
 
-    if (send_hex_in_command_) {
-        // XJ: encoding=1,1 — hex 直接拼进 AT+MIPSEND
-        std::string command = "AT+MIPSEND=" + std::to_string(udp_id_) + "," + std::to_string(data.size()) + ",";
-        at_uart_->EncodeHexAppend(command, data.c_str(), data.size());
-        if (!at_uart_->SendCommand(command, 100)) {
-            ESP_LOGE(TAG, "Failed to send data chunk");
-            return -1;
-        }
-    } else {
-        // 官方 encoding=0,1 — 命令后跟原始 payload（SendCommandWithData 会补 \r\n）
-        std::string command = "AT+MIPSEND=" + std::to_string(udp_id_) + "," + std::to_string(data.size());
-        if (!at_uart_->SendCommandWithData(command, 1000, true, data.data(), data.size())) {
-            ESP_LOGE(TAG, "Failed to send data chunk");
-            return -1;
-        }
+    // 对齐 395：hex 拼进 AT+MIPSEND，并显式补 \r\n
+    std::string command =
+        "AT+MIPSEND=" + std::to_string(udp_id_) + "," + std::to_string(data.size()) + ",";
+    at_uart_->EncodeHexAppend(command, data.data(), data.size());
+    command += "\r\n";
+    if (!at_uart_->SendCommand(command, 1000, false)) {
+        ESP_LOGE(TAG, "Failed to send data chunk");
+        return -1;
     }
     return data.size();
 }
