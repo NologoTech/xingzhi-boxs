@@ -44,15 +44,18 @@ void DualNetworkBoard::InitializeCurrentBoard() {
 
 void DualNetworkBoard::SwitchNetworkType() {
     auto display = GetDisplay();
+    auto& app = Application::GetInstance();
     if (network_type_ == NetworkType::WIFI) {    
         SaveNetworkTypeToSettings(NetworkType::ML307);
         display->ShowNotification(Lang::Strings::SWITCH_TO_4G_NETWORK);
+        app.PlaySound(Lang::Sounds::OGG_SWITCH_TO_4G);
     } else {
         SaveNetworkTypeToSettings(NetworkType::WIFI);
         display->ShowNotification(Lang::Strings::SWITCH_TO_WIFI_NETWORK);
+        app.PlaySound(Lang::Sounds::OGG_SWITCH_TO_WIFI);
     }
-    vTaskDelay(pdMS_TO_TICKS(1000));
-    auto& app = Application::GetInstance();
+    // Allow the prompt sound to finish before reboot.
+    vTaskDelay(pdMS_TO_TICKS(2500));
     app.Reboot();
 }
 

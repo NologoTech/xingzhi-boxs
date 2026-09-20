@@ -18,6 +18,7 @@ private:
     esp_timer_handle_t power_timer_handle_;
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
+    std::function<void()> on_shutdown_request_;
 
     gpio_num_t charging_pin_ = GPIO_NUM_NC;
     std::vector<uint16_t> adc_values_;
@@ -37,10 +38,10 @@ private:
     bool is_first_boot = true;              // 
     uint8_t PowerDec_level_ = 0;            // 电源键电平
     const int power_off_ticks_ = 20;        // 按键按下20/5秒准备关机;
-    bool new_charging_status = false;       // 插入usb时无法软件关机
+    bool new_charging_status = false;
     bool is_shutting_down_ = false;  // 标记是否进入关机流程
     int shutdown_delay_ticks_ = 0;   // 关机延迟计数
-    uint8_t shutdown_ticks = 5;      // 5/5s后关机 预留的关机操作
+    uint8_t shutdown_ticks = 10;     // 约 2 秒，留给关机提示音
     bool shutdown_first_ = true;
 
     // 旧版硬件软件关机逻辑
@@ -68,13 +69,16 @@ private:
                 press_ticks_ = PowerControl_ticks_;
                 pressed = true;
             }  
-            if ((press_ticks_ != 0) &&( PowerControl_ticks_ - press_ticks_ == power_off_ticks_ )&& (!new_charging_status)) {
+            if ((press_ticks_ != 0) && (PowerControl_ticks_ - press_ticks_ == power_off_ticks_)) {
                 if (timer_handle_) {
                     esp_timer_stop(timer_handle_);
                     esp_timer_delete(timer_handle_);
                 }
                 is_shutting_down_ = true;
                 shutdown_delay_ticks_ = 0;
+                if (on_shutdown_request_) {
+                    on_shutdown_request_();
+                }
             }
             if (PowerDec_level_ == 1 && press_ticks_!= 0) {
                 PowerDec_level_ = gpio_get_level(Power_Dec);
@@ -285,8 +289,12 @@ public:
         on_charging_status_changed_ = callback;
     }
 
+    void OnShutdownRequest(std::function<void()> callback) {
+        on_shutdown_request_ = callback;
+    }
+
     void shutdown() {
-        if (!new_charging_status && shutdown_first_)
+        if (shutdown_first_)
         {
             shutdown_first_ = false; // 进入后置 false ，防止再次进入关机状态
             gpio_config_t shutdown_gpio_conf = {};
@@ -307,8 +315,6 @@ public:
             }
             ESP_LOGI("PowerManager","关机失败，进入深睡眠");
             esp_deep_sleep_start();
-        } else {
-            ESP_LOGI("PowerManager","检测到插入usb，无法关机"); 
         }
     }
 };

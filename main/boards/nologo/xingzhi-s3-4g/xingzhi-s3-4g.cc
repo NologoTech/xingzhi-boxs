@@ -24,6 +24,7 @@ private:
     Button boot_button_;
     PowerSaveTimer* power_save_timer_;
     PowerManager* power_manager_;
+    uint8_t boot_multi_click_count_ = 0;
 
     void PowerOnModem() {
         // 与 xingzhi-cube / metal 一致：拉高 GPIO21 给 4G 模组供电
@@ -42,6 +43,16 @@ private:
                 power_save_timer_->SetEnabled(true);
             }
         });
+        power_manager_->OnLowBatteryStatusChanged([](bool is_low) {
+            if (is_low) {
+                Application::GetInstance().Schedule([]() {
+                    Application::GetInstance().PlaySound(Lang::Sounds::OGG_LOW_BATTERY);
+                });
+            }
+        });
+        power_manager_->OnShutdownRequest([]() {
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+        });
     }
 
     void InitializePowerSaveTimer() {
@@ -49,6 +60,9 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, -1, 300);
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
+            auto& app = Application::GetInstance();
+            app.PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             // 仅 ML307 模式下关掉 4G 供电，避免休眠漏电
             if (GetNetworkType() == NetworkType::ML307) {
                 rtc_gpio_set_level(NETWORK_MODULE_POWER_IN, 0);
@@ -77,7 +91,13 @@ private:
     }
 
     void InitializeButtons() {
+        boot_button_.OnPressDown([this]() {
+            boot_multi_click_count_++;
+            ESP_LOGI(TAG, "BOOT multi-click count: %d/5", boot_multi_click_count_);
+        });
         boot_button_.OnClick([this]() {
+            // Single-click window ended without reaching 5 clicks; reset counter
+            boot_multi_click_count_ = 0;
             power_save_timer_->WakeUp();
             auto& app = Application::GetInstance();
             if (GetNetworkType() == NetworkType::WIFI) {
@@ -89,13 +109,12 @@ private:
             }
             app.ToggleChatState();
         });
-        boot_button_.OnDoubleClick([this]() {
-            auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting ||
-                app.GetDeviceState() == kDeviceStateWifiConfiguring) {
-                SwitchNetworkType();
-            }
-        });
+        boot_button_.OnMultipleClick([this]() {
+            ESP_LOGI(TAG, "BOOT 5-click reached, switching network");
+            boot_multi_click_count_ = 0;
+            power_save_timer_->WakeUp();
+            SwitchNetworkType();
+        }, 5);
     }
 
 public:

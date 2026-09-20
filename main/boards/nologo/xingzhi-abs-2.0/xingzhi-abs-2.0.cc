@@ -82,6 +82,9 @@ private:
                 power_save_timer_->SetEnabled(true);
             }
         });
+        power_manager_->OnShutdownRequest([]() {
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+        });
     }
 
     void InitializePowerSaveTimer() {
@@ -99,6 +102,8 @@ private:
         });
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             power_manager_->shutdown();
         });
         power_save_timer_->SetEnabled(true);

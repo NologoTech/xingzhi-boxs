@@ -19,6 +19,7 @@ private:
     esp_timer_handle_t power_timer_handle_;
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
+    std::function<void()> on_shutdown_request_;
 
     gpio_num_t charging_pin_ = GPIO_NUM_NC;
     std::vector<uint16_t> adc_values_;
@@ -38,13 +39,25 @@ private:
     bool is_first_boot = true; // 新增一个变量用于标记是否为首次开机
     uint8_t PowerDec_level_ = 0; // 电源键电平
     const int power_off_ticks_ = 10; // 按键按下10/5秒后关机;
+    bool is_shutting_down_ = false;
+    int shutdown_delay_ticks_ = 0;
+    const int shutdown_ticks_ = 10;  // 约 2 秒，留给关机提示音
 
     void PowrSwitch() {
         PowerDec_level_ = gpio_get_level(Power_Dec);
 
         if (PowerDec_level_ == 1) {
             is_first_boot = false;
-        } 
+        }
+
+        if (is_shutting_down_) {
+            shutdown_delay_ticks_++;
+            if (shutdown_delay_ticks_ >= shutdown_ticks_) {
+                ESP_LOGI("powercontrol", "shut down...");
+                esp_deep_sleep_start();
+            }
+            return;
+        }
 
         if (!is_first_boot) {
             PowerControl_ticks_++;
@@ -57,8 +70,11 @@ private:
                     esp_timer_stop(timer_handle_);
                     esp_timer_delete(timer_handle_);
                 }
-                ESP_LOGI("powercontrol", "shut down...");
-                esp_deep_sleep_start();
+                is_shutting_down_ = true;
+                shutdown_delay_ticks_ = 0;
+                if (on_shutdown_request_) {
+                    on_shutdown_request_();
+                }
             }
             if (PowerDec_level_ == 1 && press_ticks_!= 0) {
                 PowerDec_level_ = gpio_get_level(Power_Dec);
@@ -265,5 +281,9 @@ public:
 
     void OnChargingStatusChanged(std::function<void(bool)> callback) {
         on_charging_status_changed_ = callback;
+    }
+
+    void OnShutdownRequest(std::function<void()> callback) {
+        on_shutdown_request_ = callback;
     }
 };

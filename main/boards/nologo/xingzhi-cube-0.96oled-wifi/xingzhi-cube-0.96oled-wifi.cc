@@ -57,6 +57,8 @@ private:
         });
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             rtc_gpio_set_level(GPIO_NUM_21, 0);
             // 启用保持功能，确保睡眠期间电平不变
             rtc_gpio_hold_en(GPIO_NUM_21);

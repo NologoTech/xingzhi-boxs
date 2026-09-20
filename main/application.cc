@@ -70,6 +70,9 @@ void Application::Initialize() {
     audio_service_.Initialize(codec);
     audio_service_.Start();
 
+    // Play welcome sound as soon as audio is ready (power-on prompt)
+    Schedule([this]() { audio_service_.PlaySound(Lang::Sounds::OGG_WELCOME); });
+
     AudioServiceCallbacks callbacks;
     callbacks.on_send_queue_available = [this]() {
         xEventGroupSetBits(event_group_, MAIN_EVENT_SEND_AUDIO);
@@ -330,11 +333,7 @@ void Application::HandleActivationDoneEvent() {
     ota_.reset();
     // Align with xingzhi-ai-395: do not enable WiFi power save immediately after
     // activation; keep link responsive until the audio channel closes.
-
-    Schedule([this]() {
-        // Play the success sound to indicate the device is ready
-        audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
-    });
+    // Welcome sound is played at Initialize() as the power-on prompt.
 }
 
 void Application::ActivationTask() {
@@ -743,6 +742,8 @@ void Application::HandleToggleChatEvent() {
             Schedule([this, mode]() { ContinueOpenAudioChannel(mode); });
             return;
         }
+        // Button/manual entry into listening: play popup after decoder reset
+        play_popup_on_listening_ = true;
         SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
@@ -772,6 +773,8 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
     // Drop toggles queued while OpenAudioChannel blocked the main task.
     xEventGroupClearBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
+    // First entry into listening after opening the channel
+    play_popup_on_listening_ = true;
     SetListeningMode(mode);
 }
 
@@ -799,9 +802,11 @@ void Application::HandleStartListeningEvent() {
             Schedule([this]() { ContinueOpenAudioChannel(kListeningModeManualStop); });
             return;
         }
+        play_popup_on_listening_ = true;
         SetListeningMode(kListeningModeManualStop);
     } else if (state == kDeviceStateSpeaking) {
         AbortSpeaking(kAbortReasonNone);
+        play_popup_on_listening_ = true;
         SetListeningMode(kListeningModeManualStop);
     }
 }
@@ -977,6 +982,7 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(false);
+            audio_service_.PlaySound(Lang::Sounds::OGG_WIFICONFIG);
             break;
         default:
             // Do nothing

@@ -18,6 +18,7 @@
         "CHECK_NEW_VERSION_FAILED": "检查新版本失败，将在 %d 秒后重试：%s",
         "SWITCH_TO_WIFI_NETWORK": "切换到 Wi-Fi...",
         "SWITCH_TO_4G_NETWORK": "切换到 4G...",
+        "SHUTTING_DOWN": "正在关机...",
         "STANDBY": "待命",
         "CONNECT_TO": "连接 ",
         "CONNECTING": "连接中...",

@@ -18,6 +18,7 @@ private:
     esp_timer_handle_t power_timer_handle_ = nullptr;
     std::function<void(bool)> on_charging_status_changed_;
     std::function<void(bool)> on_low_battery_status_changed_;
+    std::function<void()> on_shutdown_request_;
 
     gpio_num_t charging_pin_ = GPIO_NUM_NC;
     std::vector<uint16_t> adc_values_;
@@ -39,7 +40,7 @@ private:
     bool new_charging_status_ = false;
     bool is_shutting_down_ = false;
     int shutdown_delay_ticks_ = 0;
-    const uint8_t shutdown_ticks_ = 5;
+    const uint8_t shutdown_ticks_ = 10;  // 约 2 秒，留给关机提示音
     bool shutdown_first_ = true;
 
     void PowrSwitch() {
@@ -66,8 +67,7 @@ private:
                 pressed_ = true;
             }
             if (press_ticks_ != 0 &&
-                power_control_ticks_ - press_ticks_ == power_off_ticks_ &&
-                !new_charging_status_) {
+                power_control_ticks_ - press_ticks_ == power_off_ticks_) {
                 if (timer_handle_) {
                     esp_timer_stop(timer_handle_);
                     esp_timer_delete(timer_handle_);
@@ -75,6 +75,9 @@ private:
                 }
                 is_shutting_down_ = true;
                 shutdown_delay_ticks_ = 0;
+                if (on_shutdown_request_) {
+                    on_shutdown_request_();
+                }
             }
             if (power_dec_level_ == 1 && press_ticks_ != 0) {
                 pressed_ = false;
@@ -271,14 +274,16 @@ public:
         on_charging_status_changed_ = callback;
     }
 
+    void OnShutdownRequest(std::function<void()> callback) {
+        on_shutdown_request_ = callback;
+    }
+
     void shutdown() {
-        if (!new_charging_status_ && shutdown_first_) {
+        if (shutdown_first_) {
             shutdown_first_ = false;
             gpio_set_level(POWER_CONTROL, 0);
             ESP_LOGI("PowerManager", "Power cut, entering deep sleep");
             esp_deep_sleep_start();
-        } else {
-            ESP_LOGI("PowerManager", "USB connected, skip shutdown");
         }
     }
 };

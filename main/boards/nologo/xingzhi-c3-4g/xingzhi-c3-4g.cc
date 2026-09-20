@@ -5,6 +5,7 @@
 #include "config.h"
 #include "power_save_timer.h"
 #include "power_manager.h"
+#include "assets/lang_config.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -29,6 +30,9 @@ private:
                 power_save_timer_->SetEnabled(true);
             }
         });
+        power_manager_->OnShutdownRequest([]() {
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+        });
     }
 
     void InitializePowerSaveTimer() {
@@ -36,6 +40,8 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, -1, 300);
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
+            Application::GetInstance().PlaySound(Lang::Sounds::OGG_SHUTDOWN);
+            vTaskDelay(pdMS_TO_TICKS(2000));
             esp_deep_sleep_start();
         });
         power_save_timer_->SetEnabled(true);
