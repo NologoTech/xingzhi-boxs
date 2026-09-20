@@ -1,19 +1,24 @@
-#include "ml307_board.h"
+#include "dual_network_board.h"
+#include "wifi_board.h"
 #include "codecs/es8311_audio_codec.h"
 #include "application.h"
 #include "button.h"
 #include "config.h"
 #include "power_save_timer.h"
 #include "power_manager.h"
+#include "led/single_led.h"
+#include "assets/lang_config.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #define TAG "XINGZHI_S3_4G"
 
-class XINGZHI_S3_4G : public Ml307Board {
+class XINGZHI_S3_4G : public DualNetworkBoard {
 private:
     i2c_master_bus_handle_t codec_i2c_bus_;
     Button boot_button_;
@@ -44,9 +49,11 @@ private:
         power_save_timer_ = new PowerSaveTimer(-1, -1, 300);
         power_save_timer_->OnShutdownRequest([this]() {
             ESP_LOGI(TAG, "Shutting down");
-            // 关机前关掉 4G 供电，避免休眠漏电
-            rtc_gpio_set_level(NETWORK_MODULE_POWER_IN, 0);
-            rtc_gpio_hold_en(NETWORK_MODULE_POWER_IN);
+            // 仅 ML307 模式下关掉 4G 供电，避免休眠漏电
+            if (GetNetworkType() == NetworkType::ML307) {
+                rtc_gpio_set_level(NETWORK_MODULE_POWER_IN, 0);
+                rtc_gpio_hold_en(NETWORK_MODULE_POWER_IN);
+            }
             power_manager_->shutdown();
         });
         power_save_timer_->SetEnabled(true);
@@ -72,14 +79,32 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
-            Application::GetInstance().ToggleChatState();
+            auto& app = Application::GetInstance();
+            if (GetNetworkType() == NetworkType::WIFI) {
+                if (app.GetDeviceState() == kDeviceStateStarting) {
+                    auto& wifi_board = static_cast<WifiBoard&>(GetCurrentBoard());
+                    wifi_board.EnterWifiConfigMode();
+                    return;
+                }
+            }
+            app.ToggleChatState();
+        });
+        boot_button_.OnDoubleClick([this]() {
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateStarting ||
+                app.GetDeviceState() == kDeviceStateWifiConfiguring) {
+                SwitchNetworkType();
+            }
         });
     }
 
 public:
     XINGZHI_S3_4G()
-        : Ml307Board(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC), boot_button_(BOOT_BUTTON_GPIO) {
-        PowerOnModem();
+        : DualNetworkBoard(ML307_TX_PIN, ML307_RX_PIN, GPIO_NUM_NC, 1),
+          boot_button_(BOOT_BUTTON_GPIO) {
+        if (GetNetworkType() == NetworkType::ML307) {
+            PowerOnModem();
+        }
         InitializePowerManager();
         InitializePowerSaveTimer();
         InitializeCodecI2c();
@@ -87,18 +112,30 @@ public:
     }
 
     virtual void StartNetwork() override {
-        PowerOnModem();
-        // 对齐旧 Ml307Board：给模组上电后留出启动时间再探测
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        Ml307Board::StartNetwork();
+        if (GetNetworkType() == NetworkType::ML307) {
+            PowerOnModem();
+            // 对齐旧 Ml307Board：给模组上电后留出启动时间再探测
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        DualNetworkBoard::StartNetwork();
+    }
+
+    virtual Led* GetLed() override {
+        static SingleLed led(BUILTIN_LED_GPIO);
+        return &led;
     }
 
     virtual AudioCodec* GetAudioCodec() override {
+        // WiFi: GPIO21 is speaker PA enable (align xingzhi-ai-395).
+        // ML307: keep NC so codec init cannot pull the modem power pin low;
+        // PowerOnModem() already drives NETWORK_MODULE_POWER_IN high.
+        static const gpio_num_t pa_pin =
+            (GetNetworkType() == NetworkType::WIFI) ? NETWORK_MODULE_POWER_IN : GPIO_NUM_NC;
         static Es8311AudioCodec audio_codec(codec_i2c_bus_, I2C_NUM_0, AUDIO_INPUT_SAMPLE_RATE,
                                             AUDIO_OUTPUT_SAMPLE_RATE, AUDIO_I2S_GPIO_MCLK,
                                             AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS,
-                                            AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN,
-                                            AUDIO_CODEC_PA_PIN, AUDIO_CODEC_ES8311_ADDR);
+                                            AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN, pa_pin,
+                                            AUDIO_CODEC_ES8311_ADDR);
         return &audio_codec;
     }
 
@@ -118,7 +155,7 @@ public:
         if (level != PowerSaveLevel::LOW_POWER) {
             power_save_timer_->WakeUp();
         }
-        Ml307Board::SetPowerSaveLevel(level);
+        DualNetworkBoard::SetPowerSaveLevel(level);
     }
 };
 

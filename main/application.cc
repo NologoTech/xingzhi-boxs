@@ -328,8 +328,8 @@ void Application::HandleActivationDoneEvent() {
 
     // Release OTA object after activation is complete
     ota_.reset();
-    auto& board = Board::GetInstance();
-    board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
+    // Align with xingzhi-ai-395: do not enable WiFi power save immediately after
+    // activation; keep link responsive until the audio channel closes.
 
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
@@ -516,22 +516,8 @@ void Application::InitializeProtocol() {
     });
 
     protocol_->OnIncomingAudio([this](std::unique_ptr<AudioStreamPacket> packet) {
-        auto state = GetDeviceState();
-        // Listening 也入队：避免首批 UDP 早于 tts start 的 Schedule 被静默丢弃
-        if (state == kDeviceStateSpeaking || state == kDeviceStateListening) {
-            if (!audio_service_.PushPacketToDecodeQueue(std::move(packet), true)) {
-                static uint32_t push_fail = 0;
-                if ((++push_fail % 20) == 1) {
-                    ESP_LOGW(TAG, "PushPacketToDecodeQueue failed count=%lu",
-                             static_cast<unsigned long>(push_fail));
-                }
-            }
-        } else {
-            static uint32_t drop_count = 0;
-            if ((++drop_count % 20) == 1) {
-                ESP_LOGW(TAG, "Drop incoming audio, state=%d count=%lu", static_cast<int>(state),
-                         static_cast<unsigned long>(drop_count));
-            }
+        if (GetDeviceState() == kDeviceStateSpeaking) {
+            audio_service_.PushPacketToDecodeQueue(std::move(packet));
         }
     });
 
@@ -569,14 +555,9 @@ void Application::InitializeProtocol() {
             if (strcmp(state->valuestring, "start") == 0) {
                 Schedule([this]() {
                     aborted_ = false;
-                    auto device_state = GetDeviceState();
-                    // 对齐 395：仅从 Idle/Listening 进入 Speaking
-                    if (device_state == kDeviceStateIdle || device_state == kDeviceStateListening) {
-                        SetDeviceState(kDeviceStateSpeaking);
-                    }
+                    SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                ESP_LOGI(TAG, "TTS stop received");
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
                         if (listening_mode_ == kListeningModeManualStop) {
@@ -716,7 +697,15 @@ void Application::DismissAlert() {
     }
 }
 
-void Application::ToggleChatState() { xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT); }
+void Application::ToggleChatState() {
+    // Align with xingzhi-ai-395: gate on current state at press time so that
+    // clicks during Connecting are ignored instead of queued as a later close.
+    auto state = GetDeviceState();
+    if (state == kDeviceStateConnecting) {
+        return;
+    }
+    xEventGroupSetBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
+}
 
 void Application::StartListening() { xEventGroupSetBits(event_group_, MAIN_EVENT_START_LISTENING); }
 
@@ -735,6 +724,9 @@ void Application::HandleToggleChatEvent() {
     } else if (state == kDeviceStateAudioTesting) {
         audio_service_.EnableAudioTesting(false);
         SetDeviceState(kDeviceStateWifiConfiguring);
+        return;
+    } else if (state == kDeviceStateConnecting) {
+        // Defensive: Connecting presses should already be dropped in ToggleChatState.
         return;
     }
 
@@ -778,6 +770,8 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
         }
     }
 
+    // Drop toggles queued while OpenAudioChannel blocked the main task.
+    xEventGroupClearBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
     SetListeningMode(mode);
 }
 
@@ -913,11 +907,14 @@ void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     }
     // Set the chat state to wake word detected
     protocol_->SendWakeWordDetected(wake_word);
+    // Drop toggles queued while OpenAudioChannel blocked the main task.
+    xEventGroupClearBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
     SetListeningMode(GetDefaultListeningMode());
 #else
     // Set flag to play popup sound after state changes to listening
     // (PlaySound here would be cleared by ResetDecoder in EnableVoiceProcessing)
     play_popup_on_listening_ = true;
+    xEventGroupClearBits(event_group_, MAIN_EVENT_TOGGLE_CHAT);
     SetListeningMode(GetDefaultListeningMode());
 #endif
 }
@@ -972,8 +969,8 @@ void Application::HandleStateChangedEvent() {
 
             if (listening_mode_ != kListeningModeRealtime) {
                 audio_service_.EnableVoiceProcessing(false);
-                // TTS 播放与 WakeNet 同时运行会争用内部 SRAM，4G 下易导致 AES/UDP 问题。
-                audio_service_.EnableWakeWordDetection(false);
+                // Only AFE wake word can be detected in speaking mode
+                audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
             break;

@@ -78,14 +78,7 @@ sequenceDiagram
   "version": 3,
   "transport": "udp",
   "features": {
-    "mcp": true,
-    "glyph_push": true
-  },
-  "text_font": {
-    "bundle": "noto-v1",
-    "charset": "common",
-    "size": 20,
-    "bpp": 4
+    "mcp": true
   },
   "audio_params": {
     "format": "opus",
@@ -96,8 +89,7 @@ sequenceDiagram
 }
 ```
 
-`features.glyph_push` 和 `text_font` 声明 WebSocket 与 MQTT/UDP 共用的动态文字扩展，详见
-[动态文字 Glyph Push 扩展](glyph-push_zh.md)。
+`features` 目前仅声明 `mcp: true`（支持 MCP 工具）。`aec`、`glyph_push` 等可选扩展不再在 hello 中广告。
 
 #### 3.2.2 服务器响应 Hello
 

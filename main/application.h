@@ -89,7 +89,8 @@ public:
 
     /**
      * Toggle chat state (event-based, thread-safe)
-     * Sends MAIN_EVENT_TOGGLE_CHAT to be handled in Run()
+     * Toggle chat at press time. Connecting is ignored (xingzhi-ai-395).
+     * Otherwise sends MAIN_EVENT_TOGGLE_CHAT to be handled in Run().
      */
     void ToggleChatState();
 

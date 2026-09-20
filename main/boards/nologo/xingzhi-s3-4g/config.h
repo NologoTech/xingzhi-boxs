@@ -23,6 +23,9 @@
 // 按键
 #define BOOT_BUTTON_GPIO GPIO_NUM_8
 
+// WS2812 状态灯
+#define BUILTIN_LED_GPIO GPIO_NUM_48
+
 // 4G
 #define ML307_RX_PIN GPIO_NUM_11
 #define ML307_TX_PIN GPIO_NUM_12

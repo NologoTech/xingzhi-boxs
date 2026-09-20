@@ -6,7 +6,6 @@
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
-#include <cstdint>
 #include <string>
 
 #define ML307_UDP_CONNECTED BIT0
@@ -45,7 +44,6 @@ private:
     int last_error_ = -1;
     std::string resolved_ip_;
     bool send_hex_in_command_ = true;
-    uint32_t rx_packet_count_ = 0;
 };
 
 #endif // ML307_UDP_H

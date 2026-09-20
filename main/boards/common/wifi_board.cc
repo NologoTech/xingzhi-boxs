@@ -282,7 +282,9 @@ void WifiBoard::SetPowerSaveLevel(PowerSaveLevel level) {
     WifiPowerSaveLevel wifi_level;
     switch (level) {
         case PowerSaveLevel::LOW_POWER:
-            wifi_level = WifiPowerSaveLevel::LOW_POWER;
+            // Align with xingzhi-ai-395: SetPowerSaveMode(true) → WIFI_PS_MIN_MODEM.
+            // Mapping LOW_POWER to MAX_MODEM drops idle MQTT/TLS within seconds.
+            wifi_level = WifiPowerSaveLevel::BALANCED;
             break;
         case PowerSaveLevel::BALANCED:
             wifi_level = WifiPowerSaveLevel::BALANCED;

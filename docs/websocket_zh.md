@@ -26,14 +26,7 @@
      "type": "hello",
      "version": 1,
      "features": {
-       "mcp": true,
-       "glyph_push": true
-     },
-     "text_font": {
-       "bundle": "noto-v1",
-       "charset": "common",
-       "size": 20,
-       "bpp": 4
+       "mcp": true
      },
      "transport": "websocket",
      "audio_params": {
@@ -44,8 +37,7 @@
      }
    }
    ```
-   - 其中 `features` 字段为可选，内容根据设备编译配置自动生成。例如：`"mcp": true` 表示支持 MCP 协议。
-   - `"glyph_push": true` 和 `text_font` 声明可选的动态文字 glyph 扩展，详见[动态文字 Glyph Push 扩展](glyph-push_zh.md)。
+   - `features` 目前仅声明 `"mcp": true`（支持 MCP 工具）。`aec`、`glyph_push` 等可选扩展不再在 hello 中广告。
    - `frame_duration` 的值对应 `OPUS_FRAME_DURATION_MS`（例如 60ms）。
 
 4. **服务器回复 "hello"**  

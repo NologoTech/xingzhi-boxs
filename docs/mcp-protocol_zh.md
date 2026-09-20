@@ -49,8 +49,7 @@ MCP 的交互主要围绕客户端（后台 API）发现和调用设备上的“
         "type": "hello",
         "version": ...,
         "features": {
-          "mcp": true,
-          ...
+          "mcp": true
         },
         "transport": "websocket", // 或 "mqtt"
         "audio_params": { ... },

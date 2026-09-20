@@ -6,8 +6,6 @@
 #include <esp_log.h>
 #include <arpa/inet.h>
 #include <cstring>
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
 #include "assets/lang_config.h"
 
 #define TAG "MQTT"
@@ -73,8 +71,6 @@ bool MqttProtocol::Start() { return StartMqttClient(false); }
 bool MqttProtocol::StartMqttClient(bool report_error) {
     if (mqtt_ != nullptr) {
         ESP_LOGW(TAG, "Mqtt client already started");
-        // 先让模组侧真正断开，再销毁本地对象，避免孤儿连接导致后续 Publish 超时。
-        mqtt_->Disconnect();
         mqtt_.reset();
     }
 
@@ -133,9 +129,7 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
             auto session_id = cJSON_GetObjectItem(root, "session_id");
             ESP_LOGI(TAG, "Received goodbye message, session_id: %s",
                      cJSON_IsString(session_id) ? session_id->valuestring : "null");
-            // 与 395 对齐：无 session_id 或匹配当前会话时关通道；仍不回 goodbye 以防乒乓。
-            if (session_id == nullptr || !cJSON_IsString(session_id) ||
-                session_id_ == session_id->valuestring) {
+            if (cJSON_IsString(session_id) && session_id_ == session_id->valuestring) {
                 auto alive = alive_;  // Capture alive flag
                 Application::GetInstance().Schedule([this, alive]() {
                     if (*alive) {
@@ -172,24 +166,15 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
 }
 
 bool MqttProtocol::SendText(const std::string& text) {
-    if (publish_topic_.empty() || mqtt_ == nullptr) {
+    if (publish_topic_.empty()) {
         return false;
     }
-    // 蜂窝链路偶发 AT 超时；消息有时已发出但本地误判失败。短重试可消掉瞬时抖动。
-    constexpr int kMaxAttempts = 3;
-    for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
-        if (mqtt_->Publish(publish_topic_, text)) {
-            return true;
-        }
-        ESP_LOGW(TAG, "Publish failed attempt %d/%d (len=%u)", attempt, kMaxAttempts,
-                 (unsigned)text.size());
-        if (attempt < kMaxAttempts) {
-            vTaskDelay(pdMS_TO_TICKS(300));
-        }
+    if (!mqtt_->Publish(publish_topic_, text)) {
+        ESP_LOGE(TAG, "Failed to publish message: %s", text.c_str());
+        SetError(Lang::Strings::SERVER_ERROR);
+        return false;
     }
-    ESP_LOGE(TAG, "Failed to publish message: %s", text.c_str());
-    SetError(Lang::Strings::SERVER_ERROR);
-    return false;
+    return true;
 }
 
 bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
@@ -284,8 +269,6 @@ bool MqttProtocol::OpenAudioChannel() {
          * UDP Encrypted OPUS Packet Format:
          * |type 1u|flags 1u|payload_len 2u|ssrc 4u|timestamp 4u|sequence 4u|
          * |payload payload_len|
-         *
-         * modem_receive / udp_receive 任务栈较小，AES 解密须在主循环执行，避免栈溢出。
          */
         constexpr size_t kAudioHeaderSize = 16;
         if (data.size() < kAudioHeaderSize) {
@@ -296,12 +279,58 @@ bool MqttProtocol::OpenAudioChannel() {
             ESP_LOGE(TAG, "Invalid audio packet type: %x", static_cast<uint8_t>(data[0]));
             return;
         }
-        auto alive = alive_;
-        Application::GetInstance().Schedule([this, alive, data]() {
-            if (*alive) {
-                ProcessIncomingAudioPacket(data);
+        uint16_t payload_len = 0;
+        uint32_t timestamp = 0;
+        uint32_t sequence = 0;
+        memcpy(&payload_len, data.data() + 2, sizeof(payload_len));
+        memcpy(&timestamp, data.data() + 8, sizeof(timestamp));
+        memcpy(&sequence, data.data() + 12, sizeof(sequence));
+        payload_len = ntohs(payload_len);
+        timestamp = ntohl(timestamp);
+        sequence = ntohl(sequence);
+        if (data.size() != kAudioHeaderSize + payload_len) {
+            ESP_LOGE(TAG, "Audio payload length mismatch: header=%u, datagram=%zu",
+                     static_cast<unsigned>(payload_len), data.size() - kAudioHeaderSize);
+            return;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(channel_mutex_);
+            if (sequence <= remote_sequence_) {
+                ESP_LOGW(TAG, "Received duplicate/old audio sequence: %lu, last: %lu", sequence,
+                         remote_sequence_);
+                return;
             }
-        });
+            if (sequence != remote_sequence_ + 1) {
+                ESP_LOGW(TAG, "Received audio packet with wrong sequence: %lu, expected: %lu",
+                         sequence, remote_sequence_ + 1);
+            }
+        }
+
+        const size_t decrypted_size = payload_len;
+        auto nonce = reinterpret_cast<const uint8_t*>(data.data());
+        auto encrypted = reinterpret_cast<const uint8_t*>(data.data() + kAudioHeaderSize);
+        auto packet = std::make_unique<AudioStreamPacket>();
+        packet->sample_rate = server_sample_rate_;
+        packet->frame_duration = server_frame_duration_;
+        packet->timestamp = timestamp;
+        packet->payload.resize(decrypted_size);
+        if (!CryptAesCtr(encrypted, decrypted_size, nonce,
+                         reinterpret_cast<uint8_t*>(packet->payload.data()))) {
+            ESP_LOGE(TAG, "Failed to decrypt audio data");
+            return;
+        }
+        {
+            std::lock_guard<std::mutex> lock(channel_mutex_);
+            if (sequence <= remote_sequence_) {
+                return;
+            }
+            remote_sequence_ = sequence;
+        }
+        last_incoming_time_ = std::chrono::steady_clock::now();
+        if (on_incoming_audio_ != nullptr) {
+            on_incoming_audio_(std::move(packet));
+        }
     });
 
     if (!udp->Connect(udp_server_, udp_port_)) {
@@ -320,7 +349,7 @@ bool MqttProtocol::OpenAudioChannel() {
 }
 
 std::string MqttProtocol::GetHelloMessage() {
-    // 发送 hello 消息申请 UDP 通道（4G MQTT 对齐 395：仅声明 mcp）
+    // 发送 hello 消息申请 UDP 通道
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", "hello");
     cJSON_AddNumberToObject(root, "version", 3);
@@ -339,82 +368,6 @@ std::string MqttProtocol::GetHelloMessage() {
     cJSON_free(json_str);
     cJSON_Delete(root);
     return message;
-}
-
-void MqttProtocol::ProcessIncomingAudioPacket(const std::string& data) {
-    constexpr size_t kAudioHeaderSize = 16;
-    std::unique_ptr<AudioStreamPacket> packet;
-    {
-        std::lock_guard<std::mutex> lock(channel_mutex_);
-        if (udp_ == nullptr) {
-            return;
-        }
-        if (data.size() < kAudioHeaderSize || aes_nonce_.size() != kAudioHeaderSize) {
-            ESP_LOGW(TAG, "Audio packet too short or nonce unset: size=%zu nonce=%zu", data.size(),
-                     aes_nonce_.size());
-            return;
-        }
-
-        uint16_t payload_len = 0;
-        uint32_t timestamp = 0;
-        uint32_t sequence = 0;
-        memcpy(&payload_len, data.data() + 2, sizeof(payload_len));
-        memcpy(&timestamp, data.data() + 8, sizeof(timestamp));
-        memcpy(&sequence, data.data() + 12, sizeof(sequence));
-        payload_len = ntohs(payload_len);
-        timestamp = ntohl(timestamp);
-        sequence = ntohl(sequence);
-        if (data.size() != kAudioHeaderSize + payload_len) {
-            static uint32_t mismatch_count = 0;
-            if ((++mismatch_count % 10) == 1) {
-                ESP_LOGE(TAG,
-                         "Audio payload length mismatch: header=%u datagram=%zu count=%lu type=0x%02x",
-                         static_cast<unsigned>(payload_len), data.size() - kAudioHeaderSize,
-                         static_cast<unsigned long>(mismatch_count),
-                         static_cast<unsigned>(static_cast<uint8_t>(data[0])));
-            }
-            return;
-        }
-
-        // Align with 395: only drop strictly older sequences (seq==0 is valid on first packet).
-        if (sequence < remote_sequence_) {
-            ESP_LOGW(TAG, "Received audio packet with old sequence: %lu, last: %lu", sequence,
-                     remote_sequence_);
-            return;
-        }
-        if (sequence != remote_sequence_ + 1 && remote_sequence_ != 0) {
-            ESP_LOGW(TAG, "Received audio packet with wrong sequence: %lu, expected: %lu", sequence,
-                     remote_sequence_ + 1);
-        }
-
-        auto nonce = reinterpret_cast<const uint8_t*>(data.data());
-        auto encrypted = reinterpret_cast<const uint8_t*>(data.data() + kAudioHeaderSize);
-        packet = std::make_unique<AudioStreamPacket>();
-        packet->sample_rate = server_sample_rate_;
-        packet->frame_duration = server_frame_duration_;
-        packet->timestamp = timestamp;
-        packet->payload.resize(payload_len);
-        if (!CryptAesCtr(encrypted, payload_len, nonce,
-                         reinterpret_cast<uint8_t*>(packet->payload.data()))) {
-            ESP_LOGE(TAG, "Failed to decrypt audio data seq=%lu",
-                     static_cast<unsigned long>(sequence));
-            return;
-        }
-
-        remote_sequence_ = sequence;
-        last_incoming_time_ = std::chrono::steady_clock::now();
-        static uint32_t ok_count = 0;
-        if ((++ok_count % 50) == 1) {
-            ESP_LOGI(TAG, "Audio decrypt ok seq=%lu payload=%u count=%lu",
-                     static_cast<unsigned long>(sequence), static_cast<unsigned>(payload_len),
-                     static_cast<unsigned long>(ok_count));
-        }
-    }
-
-    // 释放 channel_mutex_ 后再入队，避免 wait=true 时与 SendAudio 死锁
-    if (packet && on_incoming_audio_ != nullptr) {
-        on_incoming_audio_(std::move(packet));
-    }
 }
 
 void MqttProtocol::ParseServerHello(const cJSON* root) {

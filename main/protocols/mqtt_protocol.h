@@ -56,7 +56,6 @@ private:
 
     bool StartMqttClient(bool report_error=false);
     void ParseServerHello(const cJSON* root);
-    void ProcessIncomingAudioPacket(const std::string& data);
     bool DecodeHexString(const std::string& hex_string, std::string& decoded);
     bool CryptAesCtr(const uint8_t* input, size_t input_size, const uint8_t* nonce, uint8_t* output);
 

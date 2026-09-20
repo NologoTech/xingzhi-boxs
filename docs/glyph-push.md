@@ -10,7 +10,8 @@ semantics of the containing message.
 
 ## 1. Capability advertisement
 
-The device advertises support in its client `hello` message:
+When a device advertises this extension, it includes `glyph_push` (and `text_font`) in its client
+`hello` message:
 
 ```json
 {
@@ -30,7 +31,9 @@ The device advertises support in its client `hello` message:
 ```
 
 `features.glyph_push` indicates support for this extension. A server must treat a missing or false
-value as unsupported. The `v` field in each pushed payload carries the extension version.
+value as unsupported. The current firmware hello advertises only `mcp` and does not set
+`glyph_push`, so servers should treat devices as unsupported unless that changes. The `v` field in
+each pushed payload carries the extension version.
 
 The `text_font` object describes the exact font data installed on the device:
 

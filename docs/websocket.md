@@ -26,15 +26,7 @@ This document describes the WebSocket communication protocol between the device 
      "type": "hello",
      "version": 1,
      "features": {
-       "mcp": true,
-       "aec": true,
-       "glyph_push": true
-     },
-     "text_font": {
-       "bundle": "noto-v1",
-       "charset": "common",
-       "size": 20,
-       "bpp": 4
+       "mcp": true
      },
      "transport": "websocket",
      "audio_params": {
@@ -45,8 +37,7 @@ This document describes the WebSocket communication protocol between the device 
      }
    }
    ```
-   - `features` is optional and generated from compile-time configuration. For example, `"mcp": true` means the device supports MCP, and `"aec": true` is emitted when `CONFIG_USE_SERVER_AEC` is enabled.
-   - `"glyph_push": true` and `text_font` advertise the optional dynamic text-glyph extension. See [Dynamic Text Glyph Push Extension](glyph-push.md).
+   - `features` currently advertises only `"mcp": true` (MCP tool support). Other optional extensions such as `aec` or `glyph_push` are not advertised in hello.
    - `frame_duration` matches `OPUS_FRAME_DURATION_MS` (typically 60 ms).
 
 4. **Server replies with "hello"**
@@ -148,8 +139,7 @@ WebSocket text frames carry JSON. The most common `"type"` values and their sema
        "type": "hello",
        "version": 1,
        "features": {
-         "mcp": true,
-         "aec": true
+         "mcp": true
        },
        "transport": "websocket",
        "audio_params": {
@@ -458,8 +448,7 @@ A simplified two-way exchange:
      "type": "hello",
      "version": 1,
      "features": {
-       "mcp": true,
-       "aec": true
+       "mcp": true
      },
      "transport": "websocket",
      "audio_params": {

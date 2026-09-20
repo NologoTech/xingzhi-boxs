@@ -148,13 +148,10 @@ bool Ml307Mqtt::Publish(const std::string topic, const std::string payload, int 
         return false;
     }
     // If payload size is larger than 64KB, a CME ERROR 601 will be returned.
-    // 蜂窝 MQTT（尤其 SSL）发布后等模组返回 OK 常超过 1s；过短会误报失败而消息其实已发出。
     std::string command = "AT+MQTTPUB=" + std::to_string(mqtt_id_) + ",\"" + topic + "\",";
     command += std::to_string(qos) + ",0,0,";
     command += std::to_string(payload.size());
-    constexpr size_t kPublishTimeoutMs = 10000;
-    return at_uart_->SendCommandWithData(command, kPublishTimeoutMs, true, payload.data(),
-                                         payload.size());
+    return at_uart_->SendCommandWithData(command, 1000, true, payload.data(), payload.size());
 }
 
 bool Ml307Mqtt::Subscribe(const std::string topic, int qos) {

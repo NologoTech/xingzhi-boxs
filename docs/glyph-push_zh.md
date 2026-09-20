@@ -8,7 +8,7 @@ MQTT/UDP 使用完全相同的扩展格式。
 
 ## 1. 能力声明
 
-设备在客户端 `hello` 消息中声明能力：
+当设备声明支持该扩展时，会在客户端 `hello` 中带上 `glyph_push`（以及 `text_font`）：
 
 ```json
 {
@@ -28,6 +28,7 @@ MQTT/UDP 使用完全相同的扩展格式。
 ```
 
 `features.glyph_push` 表示设备支持该扩展。字段缺失或为 false 时，服务器必须视为设备不支持。
+当前固件的 hello 仅声明 `mcp`，不广告 `glyph_push`，因此服务器应将其视为不支持，除非后续再次开启。
 每次推送 payload 中的 `v` 字段负责表达扩展版本。
 
 `text_font` 描述设备实际安装的文字字库：

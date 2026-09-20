@@ -79,15 +79,7 @@ The device connects to the broker using:
   "version": 3,
   "transport": "udp",
   "features": {
-    "mcp": true,
-    "aec": true,
-    "glyph_push": true
-  },
-  "text_font": {
-    "bundle": "noto-v1",
-    "charset": "common",
-    "size": 20,
-    "bpp": 4
+    "mcp": true
   },
   "audio_params": {
     "format": "opus",
@@ -98,9 +90,8 @@ The device connects to the broker using:
 }
 ```
 
-`features.mcp` is always set; `features.aec` is set when `CONFIG_USE_SERVER_AEC` is enabled.
-`features.glyph_push` and `text_font` advertise the shared dynamic text-glyph extension described in
-[Dynamic Text Glyph Push Extension](glyph-push.md).
+`features` currently advertises only `mcp: true` (MCP tool support). Other optional
+extensions such as `aec` or `glyph_push` are not advertised in hello.
 
 #### 3.2.2 Server -> Device
 
